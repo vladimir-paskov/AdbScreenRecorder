@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     id 'java-gradle-plugin'
@@ -44,4 +45,10 @@ publishing {
         }
     }
 
+}
+
+tasks.withType(KotlinCompile).configureEach {
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
 }

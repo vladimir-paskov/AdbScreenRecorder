@@ -7,15 +7,13 @@ plugins {
 
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
-apply plugin: 'kotlin-android-extensions'
 
 
 android {
-    compileSdkVersion 32
-    buildToolsVersion "30.0.3"
+    compileSdk 35
 
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = JavaVersion.VERSION_1_8.toString()
     }
 
     compileOptions {
@@ -25,8 +23,8 @@ android {
 
     defaultConfig {
         applicationId "com.ustadmobile.espressoscreenrecorder"
-        minSdkVersion 16
-        targetSdkVersion 32
+        minSdkVersion 21
+        targetSdkVersion 35
         versionCode 1
         versionName "1.0"
 
@@ -39,6 +37,8 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+
+    namespace "com.ustadmobile.espressoscreenrecorder"
 }
 
 dependencies {

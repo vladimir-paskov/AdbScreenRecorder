@@ -2,6 +2,7 @@ package com.ustadmobile.adbscreenrecorder.httpserver
 import com.google.gson.Gson
 import com.ustadmobile.adbscreenrecorder.DEFAULT_DEVICE_PORT
 import com.ustadmobile.adbscreenrecorder.DeviceInfo
+import com.ustadmobile.adbscreenrecorder.RecordingType
 import com.ustadmobile.adbscreenrecorder.TestInfo
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.html.*
@@ -15,7 +16,9 @@ import java.util.regex.Pattern
 
 
 class AdbScreenRecorderHttpServer(
+    recordingType: RecordingType,
     val deviceName: String,
+    scrcpyPath: String?,
     private val adbPath: String,
     destDir: File,
     private val devicePort: Int = DEFAULT_DEVICE_PORT,
@@ -28,7 +31,12 @@ class AdbScreenRecorderHttpServer(
         NORMAL, INFO, DEBUG
     }
 
-    private val recordingManager = RecordingManager(adbPath, destDir)
+    private val recordingManager = RecordingManager(
+        recordingType,
+        adbPath,
+        destDir,
+        scrcpyPath
+    )
 
     private val dateFormatter = DateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.LONG)
 
@@ -37,7 +45,7 @@ class AdbScreenRecorderHttpServer(
     //Map key = "testClazz/testMethod"
     val testResultsMap = mutableMapOf<String, TestInfo>()
 
-    val gson = Gson()
+    private val gson = Gson()
 
     fun startPortForwarding() {
         if(listeningPort <= 0)
@@ -62,10 +70,10 @@ class AdbScreenRecorderHttpServer(
 
     override fun serve(session: IHTTPSession): Response {
         if(session.uri.startsWith("/startRecording") || session.uri.startsWith("/endRecording")) {
-            val testClazz = session.parameters.get("testClazz")?.get(0)
-            val testMethod = session.parameters.get("testMethod")?.get(0)
-            val deviceInfoJson = session.parameters.get("deviceInfo")?.get(0)
-            val testInfoJson = session.parameters.get("testInfo")?.get(0)
+            val testClazz = session.parameters["testClazz"]?.get(0)
+            val testMethod = session.parameters["testMethod"]?.get(0)
+            val deviceInfoJson = session.parameters["deviceInfo"]?.get(0)
+            val testInfoJson = session.parameters["testInfo"]?.get(0)
 
             if(testClazz == null || testMethod == null) {
                 println("AdbScreenRecorderHttpServer: GET ${session.uri} (400) - missing testClazz or testMethod")
@@ -163,11 +171,11 @@ class AdbScreenRecorderHttpServer(
                 .bufferedReader().readText().trim().toIntOrNull() ?: -1
         }
 
-        fun getWindowIdForDevice(wmCtrlPath: String, deviceName: String): String? {
-            val devicePort = deviceName.substringAfter("-").toIntOrNull() ?: return null
-            val windowList = runProcess(listOf(wmCtrlPath, "-l")).bufferedReader().readText().lines()
-            return windowList.firstOrNull { it.endsWith(":$devicePort") }?.split("\\s".toRegex(), 2)?.get(0)
-        }
+//        fun getWindowIdForDevice(wmCtrlPath: String, deviceName: String): String? {
+//            val devicePort = deviceName.substringAfter("-").toIntOrNull() ?: return null
+//            val windowList = runProcess(listOf(wmCtrlPath, "-l")).bufferedReader().readText().lines()
+//            return windowList.firstOrNull { it.endsWith(":$devicePort") }?.split("\\s".toRegex(), 2)?.get(0)
+//        }
 
         private fun File.findVideoInDir(deviceName: String): File? {
             for(f in listOf(File(this, "$deviceName.mp4"), File(this, "$deviceName.ogv"))) {
@@ -306,7 +314,7 @@ class AdbScreenRecorderHttpServer(
         }
 
 
-        val MAP_STATUS_TO_CSS_CLASS = mapOf(TestInfo.STATUS_FAIL to "fail",
+        private val MAP_STATUS_TO_CSS_CLASS = mapOf(TestInfo.STATUS_FAIL to "fail",
             TestInfo.STATUS_NOT_RUN to "notrun",
             TestInfo.STATUS_PASS to "pass",
             TestInfo.STATUS_SKIPPED to "skipped")

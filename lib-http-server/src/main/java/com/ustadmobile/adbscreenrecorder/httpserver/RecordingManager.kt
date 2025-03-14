@@ -1,14 +1,12 @@
 package com.ustadmobile.adbscreenrecorder.httpserver
 
-import com.ustadmobile.adbscreenrecorder.httpserver.AdbScreenRecorderHttpServer.Companion.getWindowIdForDevice
+import com.ustadmobile.adbscreenrecorder.RecordingType
 import com.ustadmobile.adbscreenrecorder.httpserver.AdbScreenRecorderHttpServer.Companion.runProcess
-import net.coobird.thumbnailator.Thumbnailator
 import net.coobird.thumbnailator.Thumbnails
 import java.io.File
 import java.text.DateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
-import javax.imageio.ImageIO
 
 internal fun File.getDirForTest(className: String, methodName: String): File {
     val clazzDestDir = File(this, className)
@@ -18,46 +16,39 @@ internal fun File.getDirForTest(className: String, methodName: String): File {
     return methodDestDir
 }
 
-class RecordingManager(val adbPath: String, val destDir: File,
-                       val wmctrlPath: String? = "/usr/bin/wmctrl",
-                       val pgrepPath: String? = "/usr/bin/pgrep",
-                       val recordMyDesktopPath: String? = "/usr/bin/recordmydesktop") {
+class RecordingManager(
+    private val recordingType: RecordingType = RecordingType.ADB,
+    private val adbPath: String,
+    private val destDir: File,
+    private val scrcpyPath: String? = null) {
 
+    companion object {
+        private const val MIN_SDK = 22
 
+        private fun isWindows(): Boolean {
+            return System.getProperty("os.name").lowercase().contains("win")
+        }
 
-    enum class RecordingType {
-        ADB, RECORDMYDESKTOP
+        private fun getScrCpyProcessName(): String {
+            return if(isWindows()) {
+                "scrcpy.exe"
+            } else {
+                "scrcpy"
+            }
+        }
     }
 
     data class ProcessHolder(val process: Process, val recordingType: RecordingType,
                              val windowId: String? = null)
 
-    data class RecordMyDesktopPaths(val wmctrlPath: String, val pgrepPath: String,
-                                    val recordMyDesktopPath: String)
+    private val recordings = mutableMapOf<String, ProcessHolder>()
 
-    private val recordMyDesktopPaths: RecordMyDesktopPaths? by lazy {
-        val wmctrlPathVal = wmctrlPath
-        val pgrepPathVal = pgrepPath
-        val recordMyDesktopPathVal = recordMyDesktopPath
-
-        if(wmctrlPathVal != null && File(wmctrlPathVal).exists() &&
-            pgrepPathVal != null && File(pgrepPathVal).exists() &&
-            recordMyDesktopPathVal != null && File(recordMyDesktopPathVal).exists()) {
-            RecordMyDesktopPaths(wmctrlPathVal, pgrepPathVal, recordMyDesktopPathVal)
-        }else {
-            null
-        }
-    }
-
-    val recordings = mutableMapOf<String, ProcessHolder>()
-
-    val dateFormatter = DateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.LONG)
+    private val dateFormatter = DateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.LONG)
 
 
     fun startRecording(deviceName: String, clazzName: String, testName: String) {
         println("(${dateFormatter.format(Date())}) Starting recording on $deviceName for $clazzName.$testName using ADB $adbPath")
         val sdkInt = AdbScreenRecorderHttpServer.getAndroidSdkVersion(adbPath, deviceName)
-        val recordProcessHolder: ProcessHolder
 
         //Take a screenshot and save it
         val testMethodDir = destDir.getDirForTest(clazzName, testName)
@@ -75,32 +66,48 @@ class RecordingManager(val adbPath: String, val destDir: File,
             screenshotDest.delete()
         }
 
-        val recordPathsVal = recordMyDesktopPaths
-        if(sdkInt <= 22 && deviceName.startsWith("emulator") && recordPathsVal != null) {
-            val windowId = getWindowIdForDevice(recordPathsVal.wmctrlPath, deviceName)
-            val videoOutFile = File(testMethodDir, "$deviceName.ogv")
-            val recordProcess = ProcessBuilder(listOf(recordPathsVal.recordMyDesktopPath,
-                "--windowid=$windowId",
-                "--no-sound", "--output=${videoOutFile.absolutePath}", "--on-the-fly-encoding",
-                "--v_quality=20", "--v_bitrate=512000", "--overwrite"))
-                .redirectOutput(ProcessBuilder.Redirect.PIPE)
-                .redirectError(ProcessBuilder.Redirect.PIPE)
-                .start()
+        if(sdkInt < MIN_SDK) {
+            println("Screen recording is supported only on SDK $MIN_SDK or newer!")
+            return
+        }
 
-
-            recordProcessHolder = ProcessHolder(recordProcess, RecordingType.RECORDMYDESKTOP,
-                windowId)
-        }else {
-            val recordProcess = ProcessBuilder(listOf(adbPath, "-s", deviceName,
-                "shell", "screenrecord", "/sdcard/$clazzName-$testName.mp4"))
-                .redirectOutput(ProcessBuilder.Redirect.PIPE)
-                .redirectError(ProcessBuilder.Redirect.PIPE)
-                .start()
-
-            recordProcessHolder = ProcessHolder(recordProcess, RecordingType.ADB)
+        val recordProcessHolder: ProcessHolder = when(recordingType) {
+            RecordingType.ADB -> createAndStartAdbScreenRecordProcess(deviceName, clazzName, testName)
+            RecordingType.SCRCPY -> {
+                if(scrcpyPath.isNullOrEmpty()) {
+                    throw IllegalStateException("Recording with 'ScrCpy' requires valid 'ScrCpy' path.")
+                } else {
+                    createAndStartScrCpyProcess(deviceName, clazzName, testName)
+                }
+            }
         }
 
         recordings["$clazzName-$testName"] = recordProcessHolder
+    }
+
+    private fun createAndStartAdbScreenRecordProcess(deviceName: String,
+                                                     clazzName: String,
+                                                     testName: String) : ProcessHolder
+    {
+        val recordProcess = ProcessBuilder(listOf(adbPath, "-s", deviceName,
+            "shell", "screenrecord", "/sdcard/$clazzName-$testName.mp4"))
+            .redirectOutput(ProcessBuilder.Redirect.PIPE)
+            .redirectError(ProcessBuilder.Redirect.PIPE)
+            .start()
+
+        return ProcessHolder(recordProcess, RecordingType.ADB)
+    }
+
+    private fun createAndStartScrCpyProcess(deviceName: String, clazzName: String, testName: String): ProcessHolder {
+        val dirPath = destDir.getDirForTest(clazzName, testName)
+
+        val recordProcess = ProcessBuilder(listOf(scrcpyPath, "-s", deviceName,
+            "--no-window", "--no-playback", "--no-audio", "--record=${dirPath.absolutePath}${File.separator}${deviceName}.mp4"))
+            .redirectOutput(ProcessBuilder.Redirect.PIPE)
+            .redirectError(ProcessBuilder.Redirect.PIPE)
+            .start()
+
+        return ProcessHolder(recordProcess, RecordingType.SCRCPY)
     }
 
     fun stopRecording(deviceName: String, clazzName: String, testName: String): File {
@@ -111,7 +118,6 @@ class RecordingManager(val adbPath: String, val destDir: File,
 
         val methodDestDir = destDir.getDirForTest(clazzName, testName)
 
-        val recordPathVals = recordMyDesktopPaths
         if(processHolder.recordingType == RecordingType.ADB) {
             //Note: screenrecord itself is actually running on the device. Thus we need to send SIGINT
             // on the device, NOT to the adb process
@@ -137,23 +143,25 @@ class RecordingManager(val adbPath: String, val destDir: File,
                 }
 
             recordings.remove("$clazzName-$testName")
-        }else if(recordPathVals != null){
-            val processId = runProcess(listOf(recordPathVals.pgrepPath, "-f",
-                "recordmydesktop.*--windowid=${processHolder.windowId}.*"))
-                .bufferedReader().readText().trim()
-            println("Attempting to stop recordmydesktop PID=$processId")
-            runProcess(listOf("/usr/bin/kill", "-SIGINT", processId))
-            println("Waiting for recordmydesktop $processId")
+        } else {
+            println("Attempting to stop 'ScrCpy'.")
+            stopProcess(getScrCpyProcessName())
+            println("Waiting for 'ScrCpy' to stop.")
             processHolder.process.waitFor(60, TimeUnit.SECONDS)
 
             recordings.remove("$clazzName-$testName")
-            destVideoFile = File(methodDestDir, "$deviceName.ogv")
-        }else {
-            throw IllegalStateException("Huh? You told me this was recorded using recordmydesktop but recordPaths are null. " +
-                    "This should be reported as a bug.")
+
+            destVideoFile = File(methodDestDir, "${deviceName}.mp4")
         }
 
         return destVideoFile
     }
 
+    private fun stopProcess(processName: String) {
+        if(isWindows()) {
+            runProcess(listOf("taskkill", "/IM", processName, "/T"))
+        } else {
+            runProcess(listOf("pkill", "-SIGINT", processName))
+        }
+    }
 }

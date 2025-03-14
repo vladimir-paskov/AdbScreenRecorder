@@ -1,3 +1,4 @@
+import com.ustadmobile.adbscreenrecorder.RecordingType
 
 //The plugin block can be uncommented after lib-gradle-plugin has been built and published.
 
@@ -39,6 +40,10 @@ android {
     }
 
     namespace "com.ustadmobile.espressoscreenrecorder"
+}
+
+adbScreenRecord {
+    recordingType = RecordingType.SCRCPY
 }
 
 dependencies {

@@ -32,7 +32,7 @@ class AdbScreenRecorderPlugin : Plugin<Project> {
             AdbScreenRecorderExtension::class.java)
 
         val destDir = extension.destDir
-            ?: "${project.buildDir.absolutePath}${File.separator}reports${File.separator}adbScreenRecord"
+            ?: "${project.layout.buildDirectory.asFile.get().absolutePath}${File.separator}reports${File.separator}adbScreenRecord"
         val destination = project.file(destDir)
         destination.takeIf { !it.exists() }?.mkdirs()
 
@@ -41,6 +41,8 @@ class AdbScreenRecorderPlugin : Plugin<Project> {
         val startTask = project.task("startAdbScreenRecordServer") {
             it.doLast {
                 var adbPath = extension.adbPath
+                val scrcpyPath = extension.scrcpyPath ?: "scrcpy" // Assume "Scrcpy" is in the PATH
+
                 val localPropertiesFile = File(project.rootDir, "local.properties")
                 if(adbPath == null && localPropertiesFile.exists()) {
                     //try and find this using the local.properties file
@@ -72,23 +74,29 @@ class AdbScreenRecorderPlugin : Plugin<Project> {
 
                 val devicesList = listAndroidDevices(adbPath)
 
-                servers = devicesList.map { deviceName ->
-                    val adbServer = AdbScreenRecorderHttpServer(deviceName, adbPath, destination,
+                servers = devicesList.associateWith { deviceName ->
+                    val adbServer = AdbScreenRecorderHttpServer(
+                        extension.recordingType,
+                        deviceName,
+                        scrcpyPath,
+                        adbPath,
+                        destination,
                         logLevel = logLevelMap[project.logging.level]
-                            ?: AdbScreenRecorderHttpServer.AdbRecorderLogLevel.NORMAL)
+                            ?: AdbScreenRecorderHttpServer.AdbRecorderLogLevel.NORMAL
+                    )
                     adbServer.start(NanoHTTPD.SOCKET_READ_TIMEOUT, true)
                     adbServer.startPortForwarding()
 
-                    deviceName to adbServer
-                }.toMap()
+                    adbServer
+                }
             }
         }
 
-        val stopTask = project.task("stopAdbScreenRecordServer") {
-            it.doLast {
-                servers.values.forEach {
-                    it.stop()
-                    it.stopPortForwarding()
+        val stopTask = project.task("stopAdbScreenRecordServer") { task ->
+            task.doLast {
+                servers.values.forEach { server ->
+                    server.stop()
+                    server.stopPortForwarding()
                 }
 
                 val devicesMap = servers.map { it.value.deviceName to it.value.deviceInfo}.toMap()

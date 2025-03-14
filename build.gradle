@@ -28,14 +28,14 @@ buildscript {
         // When developing, publish to maven local, then update the version number below
         // This is used in the 'app' module to run a test.
         //classpath "com.github.UstadMobile.AdbScreenRecorder:lib-gradle-plugin:0.1-alpha11"
-        classpath "com.ustadmobile.adbscreenrecorder:com.ustadmobile.adbscreenrecorder.gradle.plugin:0.1-alpha21"
+        classpath "com.ustadmobile.adbscreenrecorder:com.ustadmobile.adbscreenrecorder.gradle.plugin:0.1-alpha32"
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
     }
 }
 
-version = "0.1-alpha21"
+version = "0.1-alpha32"
 group = "com.ustadmobile.adbscreenrecorder"
 
 allprojects {

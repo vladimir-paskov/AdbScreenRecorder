@@ -20,7 +20,8 @@ class RecordingManager(
     private val recordingType: RecordingType = RecordingType.ADB,
     private val adbPath: String,
     private val destDir: File,
-    private val scrcpyPath: String? = null) { // TODO: Test behaviour where no scrcpy is available
+    private val scrcpyPath: String? = null) {
+    private val pidLock = Any()
 
     companion object {
         private const val MIN_SDK = 22
@@ -30,52 +31,12 @@ class RecordingManager(
         }
 
         private fun getScrCpyProcessName(): String {
-            return if(isWindows()) {
-                "scrcpy.exe"
-            } else {
-                "scrcpy"
-            }
-        }
-
-        private fun getScrCpyPid(): String? {
+            var processName = "scrcpy"
             if(isWindows()) {
-                val processDetails = runProcess(
-                    listOf(
-                        "tasklist",
-                        "/FI", "IMAGENAME eq scrcpy.exe",
-                        "/FO", "CSV",
-                        "/NH"
-                    )
-                ).bufferedReader().readLines()
-
-                // Handle the case where there are no scrcpy tasks running
-                val filteredDetails = processDetails.filter { !it.startsWith("INFO:") }
-
-                val parsedProcesses = filteredDetails.mapNotNull { line ->
-                    val values = line.split(",").map { it.trim().removeSurrounding("\"") }
-                    if (values.size >= 2) {
-                        values[1]
-                    } else {
-                        null
-                    }
-                }
-
-                if(parsedProcesses.isEmpty()) {
-                    return null
-                }
-
-                for(pid in parsedProcesses) {
-                    println(pid)
-                }
-
-                // Assumption that PIDs are sorted by the order of starting
-                val pid = parsedProcesses[parsedProcesses.size - 1]
-                println("Pid is: $pid")
-                return pid
-            } else {
-                // TODO: Get nix PIDs
-                return ""
+                processName += ".exe"
             }
+
+            return processName
         }
     }
 
@@ -87,6 +48,59 @@ class RecordingManager(
 
     private val dateFormatter = DateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.LONG)
 
+    private fun getScrCpyPid(deviceName: String, attempt: Int = 1): String? {
+        synchronized(pidLock) {
+            if (isWindows()) {
+                val processDetails = runProcess(
+                    listOf(
+                        "wmic", "process", "where",
+                        "\"name='${getScrCpyProcessName()}' and CommandLine like '%${deviceName}%'\"",
+                        "get", "ProcessId,CommandLine",
+                        "/format:csv"
+                    )
+                ).bufferedReader().readLines().filter { it.isNotBlank() }.drop(1) // Drop CSV header and blank lines
+
+                println("Attempt #$attempt: WMIC Output -> $processDetails")
+
+                // Handle the case where there are no scrcpy tasks running
+                val filteredDetails = processDetails.filter { !it.startsWith("No Instance(s)") }
+
+                val parsedProcesses = filteredDetails.mapNotNull { line ->
+                    val values = line.split(",").map { it.trim().removeSurrounding("\"") }
+                    if (values.size >= 3) {
+                        values[2] // PID is the last column
+                    } else {
+                        null
+                    }
+                }
+
+                if (parsedProcesses.isEmpty()) {
+                    println("Attempt #$attempt: PID not found for $deviceName")
+
+                    // Retry up to 5 times with a short delay
+                    return if (attempt < 5) {
+                        Thread.sleep(500) // Wait 500ms before retrying
+                        getScrCpyPid(deviceName, attempt + 1)
+                    } else {
+                        println("ERROR: Failed to find scrcpy PID after 5 attempts for device $deviceName")
+                        null
+                    }
+                }
+
+                for (pid in parsedProcesses) {
+                    println("Found PID: $pid")
+                }
+
+                // Assumption: only 1 PID will be returned
+                val pid = parsedProcesses.last()
+                println("Pid is: $pid")
+                return pid
+            } else {
+                // TODO: Get nix PIDs
+                return ""
+            }
+        }
+    }
 
     fun startRecording(deviceName: String, clazzName: String, testName: String) {
         println("(${dateFormatter.format(Date())}) Starting recording on $deviceName for $clazzName.$testName using ADB $adbPath")
@@ -143,13 +157,27 @@ class RecordingManager(
     private fun createAndStartScrCpyProcess(deviceName: String, clazzName: String, testName: String): ProcessHolder {
         val dirPath = destDir.getDirForTest(clazzName, testName)
 
-        val recordProcess = ProcessBuilder(listOf(scrcpyPath, "-s", deviceName,
+        // On Windows we use --window-title <device_name> to query wmic when looking for PIDs
+        val recordProcess = ProcessBuilder(listOf(scrcpyPath, "-s", deviceName, "--window-title", deviceName, "-b", "2M",
             "--no-window", "--no-playback", "--no-audio", "--record=${dirPath.absolutePath}${File.separator}${deviceName}.mp4"))
             .redirectOutput(ProcessBuilder.Redirect.PIPE)
             .redirectError(ProcessBuilder.Redirect.PIPE)
             .start()
 
-        return ProcessHolder(recordProcess, RecordingType.SCRCPY, getScrCpyPid())
+        val reader = recordProcess.inputStream.bufferedReader()
+        reader.useLines { lines ->
+            for(line in lines) {
+                println(line)
+                if(line.contains("INFO: Recording started")) {
+                    // Wait for ScrCpy to settle after recording has started
+                    // This sometimes adds 5 seconds to the video
+                    Thread.sleep(TimeUnit.SECONDS.toMillis(5))
+                    break
+                }
+            }
+        }
+
+        return ProcessHolder(recordProcess, RecordingType.SCRCPY, getScrCpyPid(deviceName))
     }
 
     fun stopRecording(deviceName: String, clazzName: String, testName: String): File {
@@ -201,7 +229,8 @@ class RecordingManager(
 
     private fun stopProcess(processId: String?) {
         if(processId.isNullOrEmpty()) {
-            // If we have no process id, kill all scrcpy instances
+            // If we have no process id, kill all scrcpy instances, this will break the
+            // videos but will ensure no processes are left running on the test server
             if (isWindows()) {
                 runProcess(listOf("taskkill", "/F", "/IM", getScrCpyProcessName()))
             } else {

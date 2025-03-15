@@ -27,6 +27,23 @@ class AdbScreenRecorderPlugin : Plugin<Project> {
         return path
     }
 
+    private fun scrcpyFromPath(): String? {
+        var command = "scrcpy"
+        if(System.getProperty("os.name").contains("Windows")) {
+            command += ".exe"
+        }
+
+        val paths = System.getenv("PATH").split(File.pathSeparator)
+        for(path in paths) {
+            val file = File(path, command)
+            if(file.exists() && file.canExecute()) {
+                return file.absolutePath
+            }
+        }
+
+        return null
+    }
+
     override fun apply(project: Project) {
         val extension = project.extensions.create("adbScreenRecord",
             AdbScreenRecorderExtension::class.java)
@@ -41,7 +58,7 @@ class AdbScreenRecorderPlugin : Plugin<Project> {
         val startTask = project.task("startAdbScreenRecordServer") {
             it.doLast {
                 var adbPath = extension.adbPath
-                val scrcpyPath = extension.scrcpyPath ?: "scrcpy" // Assume "Scrcpy" is in the PATH
+                val scrcpyPath = extension.scrcpyPath ?: scrcpyFromPath()
 
                 val localPropertiesFile = File(project.rootDir, "local.properties")
                 if(adbPath == null && localPropertiesFile.exists()) {

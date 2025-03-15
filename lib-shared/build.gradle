@@ -24,10 +24,14 @@ publishing {
 
     repositories {
         maven {
-            url rootProject.ext.buildConfigProperties['repo.dir']
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/vladimir-paskov/AdbScreenRecorder")
+            credentials {
+                username = "${github_user}"
+                password = "${github_token}"
+            }
         }
     }
-
 }
 
 tasks.withType(KotlinCompile).configureEach {

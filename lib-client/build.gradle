@@ -60,7 +60,6 @@ afterEvaluate {
 
 dependencies {
     implementation fileTree(dir: "libs", include: ["*.jar"])
-    //implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
     implementation "androidx.core:core-ktx:$version_androidx_core"
     implementation "androidx.appcompat:appcompat:$version_androidx_appcompat"
     implementation "junit:junit:$version_junit"
@@ -85,9 +84,13 @@ publishing {
     }
 
     repositories {
-        //Set this in projectdir/extrasettings.gradle
         maven {
-            url rootProject.ext.buildConfigProperties['repo.dir']
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/vladimir-paskov/AdbScreenRecorder")
+            credentials {
+                username = "${github_user}"
+                password = "${github_token}"
+            }
         }
     }
 }

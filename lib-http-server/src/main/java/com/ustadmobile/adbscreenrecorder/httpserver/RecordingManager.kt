@@ -42,7 +42,11 @@ class RecordingManager(
 
     data class ProcessHolder(val process: Process,
                              val recordingType: RecordingType,
-                             val pid: String? = null)
+                             val pid: Long) {
+        companion object {
+            const val NO_PID = 0L
+        }
+    }
 
     private val recordings = mutableMapOf<String, ProcessHolder>()
 
@@ -151,7 +155,7 @@ class RecordingManager(
             .redirectError(ProcessBuilder.Redirect.PIPE)
             .start()
 
-        return ProcessHolder(recordProcess, RecordingType.ADB)
+        return ProcessHolder(recordProcess, RecordingType.ADB, ProcessHolder.NO_PID)
     }
 
     private fun createAndStartScrCpyProcess(deviceName: String, clazzName: String, testName: String): ProcessHolder {
@@ -177,7 +181,10 @@ class RecordingManager(
             }
         }
 
-        return ProcessHolder(recordProcess, RecordingType.SCRCPY, getScrCpyPid(deviceName))
+        val pid = recordProcess.pid()
+        println("Pid: $pid")
+
+        return ProcessHolder(recordProcess, RecordingType.SCRCPY, pid)
     }
 
     fun stopRecording(deviceName: String, clazzName: String, testName: String): File {
@@ -215,7 +222,7 @@ class RecordingManager(
             recordings.remove("$clazzName-$testName")
         } else {
             println("Attempting to stop 'ScrCpy'. PID: ${processHolder.pid}")
-            stopProcess(processHolder.pid)
+            stopProcess(processHolder.pid.toString())
             println("Waiting for 'ScrCpy' to stop.")
             processHolder.process.waitFor(60, TimeUnit.SECONDS)
 
@@ -241,7 +248,12 @@ class RecordingManager(
                 // Using windows-kill to send Ctrl - C to ScrCpy, because otherwise
                 // the recording will be corrupted.
                 // https://github.com/ElyDotDev/windows-kill
-                runProcess(listOf("windows-kill", "-2", processId))
+                val killProcessStream = runProcess(listOf("windows-kill", "-2", processId))
+                killProcessStream.bufferedReader().useLines { lines ->
+                    for(line in lines) {
+                        println(line)
+                    }
+                }
             } else {
                 // TODO: This should kill by PID also
                 runProcess(listOf("pkill", "-SIGINT", processId))

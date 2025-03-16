@@ -16,8 +16,8 @@ dependencies {
     testImplementation "junit:junit:$version_junit"
 }
 
-sourceCompatibility = "1.8"
-targetCompatibility = "1.8"
+sourceCompatibility = "1.9"
+targetCompatibility = "1.9"
 
 publishing {
     publications {
@@ -44,6 +44,6 @@ publishing {
 
 tasks.withType(KotlinCompile).configureEach {
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "9"
     }
 }

@@ -245,19 +245,45 @@ class RecordingManager(
             }
         } else {
             if(isWindows()) {
-                // Using windows-kill to send Ctrl - C to ScrCpy, because otherwise
-                // the recording will be corrupted.
-                // https://github.com/ElyDotDev/windows-kill
-                val killProcessStream = runProcess(listOf("windows-kill", "-2", processId))
-                killProcessStream.bufferedReader().useLines { lines ->
-                    for(line in lines) {
-                        println(line)
-                    }
-                }
+                stopProcessWithWindowsKill(processId)
             } else {
                 // TODO: This should kill by PID also
                 runProcess(listOf("pkill", "-SIGINT", processId))
             }
+        }
+    }
+
+    private fun stopProcessWithWindowsKill(processId: String) {
+        println("Attempting to send Ctrl-C to ScrCpy PID: $processId")
+        var attempt = 0
+        val maxAttempts = 5
+        var success = false
+
+        while (attempt < maxAttempts && !success) {
+            attempt++
+            println("Attempt #$attempt to stop scrcpy process.")
+
+            try {
+                val processStream = runProcess(listOf("windows-kill", "-2", processId))
+                val output = processStream.bufferedReader().readText()
+
+                if (output.contains("RuntimeError") || output.contains("failed")) {
+                    println("windows-kill failed: $output")
+                    Thread.sleep(2000) // Wait before retrying
+                } else {
+                    success = true
+                    println("ScrCpy successfully stopped.")
+                }
+            } catch (e: Exception) {
+                println("Exception in windows-kill execution: ${e.message}")
+                Thread.sleep(2000) // Wait before retrying
+            }
+        }
+
+        if (!success) {
+            println("Failed to stop scrcpy with Ctrl-C after $maxAttempts attempts.")
+            println("Attempting force kill as last resort.")
+            runProcess(listOf("taskkill", "/F", "/PID", processId))
         }
     }
 }

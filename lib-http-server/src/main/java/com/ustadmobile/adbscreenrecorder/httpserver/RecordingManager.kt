@@ -21,7 +21,6 @@ class RecordingManager(
     private val adbPath: String,
     private val destDir: File,
     private val scrcpyPath: String? = null) {
-    private val pidLock = Any()
 
     companion object {
         private const val MIN_SDK = 22
@@ -51,60 +50,6 @@ class RecordingManager(
     private val recordings = mutableMapOf<String, ProcessHolder>()
 
     private val dateFormatter = DateFormat.getDateTimeInstance(DateFormat.LONG, DateFormat.LONG)
-
-    private fun getScrCpyPid(deviceName: String, attempt: Int = 1): String? {
-        synchronized(pidLock) {
-            if (isWindows()) {
-                val processDetails = runProcess(
-                    listOf(
-                        "wmic", "process", "where",
-                        "\"name='${getScrCpyProcessName()}' and CommandLine like '%${deviceName}%'\"",
-                        "get", "ProcessId,CommandLine",
-                        "/format:csv"
-                    )
-                ).bufferedReader().readLines().filter { it.isNotBlank() }.drop(1) // Drop CSV header and blank lines
-
-                println("Attempt #$attempt: WMIC Output -> $processDetails")
-
-                // Handle the case where there are no scrcpy tasks running
-                val filteredDetails = processDetails.filter { !it.startsWith("No Instance(s)") }
-
-                val parsedProcesses = filteredDetails.mapNotNull { line ->
-                    val values = line.split(",").map { it.trim().removeSurrounding("\"") }
-                    if (values.size >= 3) {
-                        values[2] // PID is the last column
-                    } else {
-                        null
-                    }
-                }
-
-                if (parsedProcesses.isEmpty()) {
-                    println("Attempt #$attempt: PID not found for $deviceName")
-
-                    // Retry up to 5 times with a short delay
-                    return if (attempt < 5) {
-                        Thread.sleep(500) // Wait 500ms before retrying
-                        getScrCpyPid(deviceName, attempt + 1)
-                    } else {
-                        println("ERROR: Failed to find scrcpy PID after 5 attempts for device $deviceName")
-                        null
-                    }
-                }
-
-                for (pid in parsedProcesses) {
-                    println("Found PID: $pid")
-                }
-
-                // Assumption: only 1 PID will be returned
-                val pid = parsedProcesses.last()
-                println("Pid is: $pid")
-                return pid
-            } else {
-                // TODO: Get nix PIDs
-                return ""
-            }
-        }
-    }
 
     fun startRecording(deviceName: String, clazzName: String, testName: String) {
         println("(${dateFormatter.format(Date())}) Starting recording on $deviceName for $clazzName.$testName using ADB $adbPath")
@@ -161,8 +106,7 @@ class RecordingManager(
     private fun createAndStartScrCpyProcess(deviceName: String, clazzName: String, testName: String): ProcessHolder {
         val dirPath = destDir.getDirForTest(clazzName, testName)
 
-        // On Windows we use --window-title <device_name> to query wmic when looking for PIDs
-        val recordProcess = ProcessBuilder(listOf(scrcpyPath, "-s", deviceName, "--window-title", deviceName, "-b", "2M",
+        val recordProcess = ProcessBuilder(listOf(scrcpyPath, "-s", deviceName, "-b", "2M",
             "--no-window", "--no-playback", "--no-audio", "--record=${dirPath.absolutePath}${File.separator}${deviceName}.mp4"))
             .redirectOutput(ProcessBuilder.Redirect.PIPE)
             .redirectError(ProcessBuilder.Redirect.PIPE)
@@ -236,19 +180,20 @@ class RecordingManager(
 
     private fun stopProcess(processId: String?) {
         if(processId.isNullOrEmpty()) {
+            val scrcpy = getScrCpyProcessName()
+
             // If we have no process id, kill all scrcpy instances, this will break the
             // videos but will ensure no processes are left running on the test server
             if (isWindows()) {
-                runProcess(listOf("taskkill", "/F", "/IM", getScrCpyProcessName()))
+                runProcess(listOf("taskkill", "/F", "/IM", scrcpy))
             } else {
-                runProcess(listOf("pkill", "-SIGINT", getScrCpyProcessName()))
+                runProcess(listOf("pkill", "-SIGINT", scrcpy))
             }
         } else {
             if(isWindows()) {
                 stopProcessWithWindowsKill(processId)
             } else {
-                // TODO: This should kill by PID also
-                runProcess(listOf("pkill", "-SIGINT", processId))
+                runProcess(listOf("kill", "-SIGINT", processId))
             }
         }
     }

@@ -4,6 +4,12 @@
     <bytecodeTargetLevel target="1.8">
       <module name="AdbScreenRecorder.app" target="21" />
       <module name="AdbScreenRecorder.lib-client" target="21" />
+      <module name="AdbScreenRecorder.lib-gradle-plugin" target="9" />
+      <module name="AdbScreenRecorder.lib-gradle-plugin.main" target="9" />
+      <module name="AdbScreenRecorder.lib-gradle-plugin.test" target="9" />
+      <module name="AdbScreenRecorder.lib-http-server" target="9" />
+      <module name="AdbScreenRecorder.lib-http-server.main" target="9" />
+      <module name="AdbScreenRecorder.lib-http-server.test" target="9" />
       <module name="EspressoScreenRecorder.app" target="11" />
       <module name="EspressoScreenRecorder.lib-client" target="11" />
       <module name="lib-gradle-plugin" target="1.7" />

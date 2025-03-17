@@ -105,11 +105,28 @@ class RecordingManager(
 
     private fun createAndStartScrCpyProcess(deviceName: String, clazzName: String, testName: String): ProcessHolder {
         val dirPath = destDir.getDirForTest(clazzName, testName)
+        println("Using 'ScrCpy' from: $scrcpyPath")
 
-        val recordProcess = ProcessBuilder(listOf(scrcpyPath, "-s", deviceName, "-b", "2M",
-            "--no-window", "--no-playback", "--no-audio", "--record=${dirPath.absolutePath}${File.separator}${deviceName}.mp4"))
-            .redirectOutput(ProcessBuilder.Redirect.PIPE)
-            .redirectError(ProcessBuilder.Redirect.PIPE)
+        val scrcpyCommand = mutableListOf<String>()
+        if(!isWindows()) {
+            // Run 'ScrCpy' trough stdbuf or else will hang on *nix
+            scrcpyCommand.addAll(listOf("stdbuf", "-oL"))
+        }
+
+        scrcpyCommand.addAll(
+            listOf(
+                scrcpyPath!!,
+                "-s", deviceName,
+                "-b", "2M",
+                "--no-window",
+                "--no-playback",
+                "--no-audio",
+                "--record=${dirPath.absolutePath}${File.separator}${deviceName}.mp4"
+            )
+        )
+
+        val recordProcess = ProcessBuilder(scrcpyCommand)
+            .redirectErrorStream(true)
             .start()
 
         val reader = recordProcess.inputStream.bufferedReader()
@@ -117,13 +134,14 @@ class RecordingManager(
             for(line in lines) {
                 println(line)
                 if(line.contains("INFO: Recording started")) {
-                    // Wait for ScrCpy to settle after recording has started
-                    // This sometimes adds 5 seconds to the video
-                    Thread.sleep(TimeUnit.SECONDS.toMillis(5))
                     break
                 }
             }
         }
+
+        // Wait for ScrCpy to settle after recording has started
+        // This sometimes adds 5 seconds to the video
+        Thread.sleep(5000)
 
         val pid = recordProcess.pid()
         println("Pid: $pid")
